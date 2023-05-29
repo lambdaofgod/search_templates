@@ -1,14 +1,14 @@
-import requests
-from typing import Optional, List
+import json
+import logging
+import pprint
 from pathlib import Path
-from fastapi import File, Form, Depends, UploadFile
+from typing import List, Optional
+
+import requests
+import tqdm
+from fastapi import Depends, File, Form, UploadFile
 from pydantic import BaseModel, validator
 from requests.exceptions import ConnectionError
-import logging
-import json
-import pprint
-import tqdm.contrib.concurrent
-
 
 logging.basicConfig(level="INFO")
 
@@ -30,9 +30,8 @@ class DocSearchClient(BaseModel):
         file_paths = [path for path in directory_path.glob(glob_path) if path.is_file()]
 
         # this is pretty silly as it would be better to actually upload batches of files
-        tqdm.contrib.concurrent.process_map(
-            self._send_request_f, file_paths, max_workers=4
-        )
+        for p in tqdm.tqdm(file_paths):
+            self._send_request_f(p)
 
     def _send_request_f(self, file_path):
         with file_path.open("rb") as f:
