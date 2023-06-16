@@ -23,6 +23,7 @@ class DataframeIndexerConfig(BaseModel):
     metadata_cols: List[str]
     haystack_server_url: str
     max_workers: int = Field(default=10)
+    indexing_batch_size: int = Field(default=10)
 
     @property
     def input_df_schema(self):
@@ -94,6 +95,12 @@ class HaystackClient(BaseModel):
         return response
 
 
+class IndexedRecord(BaseModel):
+    text: str
+    path: str
+    meta: dict
+
+
 class DataframeIndexer(BaseModel):
     config: DataframeIndexerConfig
     client: HaystackClient
@@ -116,16 +123,26 @@ class DataframeIndexer(BaseModel):
         return str(hash(text)).replace("\/", "")
 
     def store_df_texts(self, df: pd.DataFrame):
-        indexed_rows = process_map(
-            self._index_row_dict,
-            [row.to_dict() for (_, row) in df.iterrows()],
-            max_workers=self.config.max_workers,
-            chunksize=1,
+        records = [self.get_indexed_record(row) for (_, row) in df.iterrows()]
+        __ = list(
+            process_map(
+                self._store_record,
+                records,
+                max_workers=self.config.max_workers,
+                chunksize=1,
+            )
         )
-        for row in indexed_rows:
-            logging.info(f"stored {row}")
+        __ = list(
+            process_map(
+                self._index_record,
+                records,
+                max_workers=self.config.max_workers,
+                chunksize=1,
+            )
+        )
 
-    def _index_row_dict(self, row_dict):
+    def get_indexed_record(self, row):
+        row_dict = row.to_dict()
         meta = {
             metadata_col: row_dict[metadata_col]
             for metadata_col in self.config.metadata_cols
@@ -133,12 +150,34 @@ class DataframeIndexer(BaseModel):
         }
         text = row_dict[self.config.text_col]
         path = row_dict["path"]
-        self._index_text(text, meta=meta, path=path)
+        return IndexedRecord(text=text, path=path, meta=meta)
 
-    def _index_text(self, text, meta, path):
-        with open(path, "w") as f:
-            f.write(text)
-        self.client.upload_files([path], [meta], verbose=False)
+    def _store_record(self, record):
+        with open(record.path, "w") as f:
+            f.write(record.text)
+
+    def _index_record(self, record):
+        self.client.upload_files(
+            [record.path],
+            [record.meta],
+            verbose=False,
+        )
 
     def _validate_input_df_schema(self, df):
         self.config.input_df_schema.validate(df)
+
+    @classmethod
+    def get_chunk_generator(cls, lst, k):
+        """
+        Split the given list into chunks of size k.
+
+        :param lst: List to be split
+        :type lst: list
+        :param k: Chunk size
+        :type k: int
+        :return: List of split chunks
+        :rtype: list
+        """
+        chunks = []
+        for i in range(0, len(lst), k):
+            yield lst[i : i + k]
