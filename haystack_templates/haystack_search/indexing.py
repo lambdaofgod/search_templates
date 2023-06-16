@@ -35,7 +35,7 @@ class DataframeIndexerConfig(BaseModel):
         )
 
 
-class HaystackClient(BaseModel):
+class HaystackUploadClient(BaseModel):
     server_url: str
 
     @validator("server_url")
@@ -103,11 +103,11 @@ class IndexedRecord(BaseModel):
 
 class DataframeIndexer(BaseModel):
     config: DataframeIndexerConfig
-    client: HaystackClient
+    client: HaystackUploadClient
 
     @classmethod
     def make_from_config(cls, config: DataframeIndexerConfig):
-        client = HaystackClient(server_url=config.haystack_server_url)
+        client = HaystackUploadClient(server_url=config.haystack_server_url)
         return DataframeIndexer(config=config, client=client)
 
     def index_df(self, df):
